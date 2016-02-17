@@ -2,24 +2,18 @@ import Foundation
 import UIKit
 
 @objc protocol SFTableViewEventDelegate{
-  optional func onPrepareParams(page : Int)->Dictionary<String,String>
-  optional func onReload()
-  optional func onLoadStart()
-  optional func onLoadEndSuccess(result : NetworkResult)
-  optional func onLoadEndError(result : NetworkResult)
-  optional func onConfigCell(view : UITableViewCell, indexPath: NSIndexPath)
-  optional func onRowButtonClicked(view: RSButton)
-  optional func onSelectRowAtIndexPath(indexPath: NSIndexPath)
+  optional func didConfigureCell(tableView: SFTableView, indexPath: NSIndexPath)
 }
 
+
 @objc protocol SFTableViewCellCompatible {
-  static func height(obj: AnyObject, width: CGFloat) -> CGFloat
-  func setContent(obj: AnyObject, width: CGFloat)
+  static func heightForCell(obj: AnyObject, width: CGFloat) -> CGFloat
+  func configureCell(obj: AnyObject, width: CGFloat)
 }
 
 class SFTableCellDataHolder {
-  var obj : AnyObject?
-  var cellClass : AnyClass?
+  var obj : AnyObject!
+  var cellClass : AnyClass!
   var cellClassName : String {
     var name : String = "\(cellClass!)"
     if name.containsString(".") {
@@ -37,15 +31,8 @@ class SFTableSectionHolder {
   var sectionFooterHeight : CGFloat = 0
 }
 
-class SFTableView : UITableView, UITableViewDelegate, UITableViewDataSource {
-  var apiUrl = ""
+@objc class SFTableView : UITableView, UITableViewDelegate, UITableViewDataSource {
   var allSections = [SFTableSectionHolder]()
-  var isLoading = false
-  var isLoadedAll = false
-  var supportPagination = true
-  var currentPage = 0
-  var cursor = ""
-  var currentRequest : Request?
   weak var eventDelegate : SFTableViewEventDelegate?
   
   var refreshControlView : UIRefreshControl?
@@ -105,15 +92,12 @@ class SFTableView : UITableView, UITableViewDelegate, UITableViewDataSource {
   }
   
   func scrollViewDidScroll(scrollView: UIScrollView) {
-    eventDelegate?.onScrollViewDidScroll?(scrollView)
     if allSections.count == 0 {
       return
     }
-    eventDelegate?.onScrollViewDidScroll?(scrollView)
     let y = scrollView.contentOffset.y + scrollView.frame.height - scrollView.contentInset.bottom;
     let h = scrollView.contentSize.height
-    if y > h - scrollView.frame.height && !isLoadedAll && !isLoading && supportPagination {
-      nextPage()
+    if y > h - scrollView.frame.height {
     }
   }
   
@@ -133,24 +117,6 @@ class SFTableView : UITableView, UITableViewDelegate, UITableViewDataSource {
   }
   
   func reload(){
-    if !isLoading {
-      isLoading = true
-      isLoadedAll = false
-      currentPage = 0
-      cursor = ""
-      loadDataFromServer()
-    }
-  }
-  
-  func nextPage(){
-    isLoading = true
-    currentPage++
-    loadDataFromServer()
-  }
-  
-  func cancel(){
-    currentRequest?.cancel()
-    isLoading = false
   }
   
   func isEmpty() -> Bool {
@@ -160,40 +126,6 @@ class SFTableView : UITableView, UITableViewDelegate, UITableViewDataSource {
       }
     }
     return true
-  }
-  
-  func loadDataFromServer(){
-    showLoading()
-    eventDelegate?.onLoadStart?()
-    var params = eventDelegate?.onPrepareParams?(currentPage)
-    params!["hits"] = String(kPageSize)
-    if cursor.isValidField {
-      params!["cursor"] = cursor
-    }
-    currentRequest = AppManagerInstance.networkManager.get(apiUrl , parameters: params, completionHandler:
-      { [weak self] result in
-        if let weakSelf = self {
-          weakSelf.handleResult(result)
-        }
-      } )
-  }
-  
-  func handleResult(result:NetworkResult){
-    hideLoading()
-    if result.isSuccess {
-      eventDelegate?.onLoadEndSuccess?(result)
-      isLoadedAll = true
-      if let newCursor = result.json?["cursor"] as? String {
-        if newCursor.isValidField {
-          cursor = newCursor
-          isLoadedAll = false
-        }
-      }
-      
-    } else {
-      eventDelegate?.onLoadEndError?(result)
-    }
-    isLoading = false
   }
   
   func clean(){
@@ -267,7 +199,7 @@ class SFTableView : UITableView, UITableViewDelegate, UITableViewDataSource {
     let section = allSections[indexPath.section]
     let cell = section.allCells[indexPath.row]
     let targetCellClass = cell.cellClass as! SFTableViewCellCompatible.Type
-    let height = targetCellClass.height(cell.obj!, width: tableView.frame.width)
+    let height = targetCellClass.heightForCell(cell.obj!, width: tableView.frame.width)
     return height
   }
   
@@ -275,16 +207,12 @@ class SFTableView : UITableView, UITableViewDelegate, UITableViewDataSource {
     let section = allSections[indexPath.section]
     let cell = section.allCells[indexPath.row]
     let view = tableView.dequeueReusableCellWithIdentifier(cell.cellClassName) as! SFTableViewCellCompatible
-    view.setContent(cell.obj!, width: tableView.frame.width)
-    eventDelegate?.onConfigCell?(view as! UITableViewCell, indexPath: indexPath)
-    if eventDelegate != nil {
-      view.setEventDelegate?(cell.obj!, delegate: eventDelegate!)
-    }
+    view.configureCell(cell.obj!, width: tableView.frame.width)
+    eventDelegate?.didConfigureCell?(self, indexPath: indexPath)
     return view as! UITableViewCell
   }
   
   func tableView(tableView: UITableView, didSelectRowAtIndexPath indexPath: NSIndexPath) {
     tableView.deselectRowAtIndexPath(indexPath, animated: true)
-    eventDelegate?.onSelectRowAtIndexPath?(indexPath)
   }
 }
